@@ -1,0 +1,10 @@
+{
+  "domain": "pse_rce",
+  "name": "PSE RCE Price Chain",
+  "codeowners": [],
+  "dependencies": [],
+  "documentation": "https://github.com/grzegorz007/ha-pse-rce",
+  "iot_class": "cloud_polling",
+  "version": "1.0.0",
+  "requirements": []
+}
