@@ -1,6 +1,7 @@
 {
   "domain": "pse_rce",
   "name": "PSE RCE Price Chain",
+  "config_flow": true,
   "codeowners": [],
   "dependencies": [],
   "documentation": "https://github.com/grzegorz007/ha-pse-rce",
