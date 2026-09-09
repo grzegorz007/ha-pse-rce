@@ -1,0 +1,64 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PSE RCE Price Chain",
+        "description": "Configure PSE RCE price chain parameters for EMHASS.",
+        "data": {
+          "horizon": "Forecast horizon",
+          "start_from_midnight": "Start from midnight",
+          "resolution": "Time resolution",
+          "fallback_strategy": "Data fallback strategy",
+          "clamp_negative_prices": "Clamp negative prices (set to 0)",
+          "price_factor": "Price multiplier (e.g. VAT 1.23)",
+          "price_offset": "Fixed price offset (e.g. grid fee in PLN/kWh)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PSE RCE Options",
+        "description": "Tune data fetching and formatting parameters.",
+        "data": {
+          "horizon": "Forecast horizon",
+          "start_from_midnight": "Start from midnight",
+          "resolution": "Time resolution",
+          "fallback_strategy": "Data fallback strategy",
+          "clamp_negative_prices": "Clamp negative prices (set to 0)",
+          "price_factor": "Price multiplier (e.g. VAT 1.23)",
+          "price_offset": "Fixed price offset (e.g. grid fee in PLN/kWh)"
+        }
+      }
+    }
+  },
+  "selector": {
+    "resolution": {
+      "options": {
+        "15m": "15 minutes (PSE default)",
+        "30m": "30 minutes (required for EMHASS)"
+      }
+    },
+    "fallback_strategy": {
+      "options": {
+        "last": "Repeat last known price",
+        "repeat": "Copy from yesterday (24h back)",
+        "zero": "Fill with zeros"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "pse_rce_price_chain": {
+        "name": "PSE RCE Price Chain"
+      },
+      "pse_rce_today_min_price": {
+        "name": "PSE RCE Today Minimum Price"
+      },
+      "pse_rce_today_max_price": {
+        "name": "PSE RCE Today Maximum Price"
+      }
+    }
+  }
+}

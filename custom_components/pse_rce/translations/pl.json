@@ -1,0 +1,64 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PSE RCE Price Chain",
+        "description": "Skonfiguruj parametry łańcucha cenowego RCE dla EMHASS.",
+        "data": {
+          "horizon": "Horyzont prognozy",
+          "start_from_midnight": "Rozpocznij od północy",
+          "resolution": "Rozdzielczość czasowa",
+          "fallback_strategy": "Strategia uzupełniania braków",
+          "clamp_negative_prices": "Niweluj ceny ujemne (ustaw 0)",
+          "price_factor": "Mnożnik ceny (np. VAT 1.23)",
+          "price_offset": "Stały offset ceny (np. opłata dystrybucyjna w PLN/kWh)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opcje PSE RCE",
+        "description": "Dostosuj parametry pobierania i formatowania danych cenowych.",
+        "data": {
+          "horizon": "Horyzont prognozy",
+          "start_from_midnight": "Rozpocznij od północy",
+          "resolution": "Rozdzielczość czasowa",
+          "fallback_strategy": "Strategia uzupełniania braków",
+          "clamp_negative_prices": "Niweluj ceny ujemne (ustaw 0)",
+          "price_factor": "Mnożnik ceny (np. VAT 1.23)",
+          "price_offset": "Stały offset ceny (np. opłata dystrybucyjna w PLN/kWh)"
+        }
+      }
+    }
+  },
+  "selector": {
+    "resolution": {
+      "options": {
+        "15m": "15 minut (domyślne PSE)",
+        "30m": "30 minut (wymagane dla EMHASS)"
+      }
+    },
+    "fallback_strategy": {
+      "options": {
+        "last": "Powiel ostatnią znaną cenę",
+        "repeat": "Skopiuj z wczoraj (24h wstecz)",
+        "zero": "Wstaw zera"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "pse_rce_price_chain": {
+        "name": "PSE RCE Łańcuch Cenowy"
+      },
+      "pse_rce_today_min_price": {
+        "name": "PSE RCE Dzisiejsza Cena Minimalna"
+      },
+      "pse_rce_today_max_price": {
+        "name": "PSE RCE Dzisiejsza Cena Maksymalna"
+      }
+    }
+  }
+}

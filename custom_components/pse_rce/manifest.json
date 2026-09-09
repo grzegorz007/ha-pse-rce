@@ -1,11 +1,12 @@
 {
   "domain": "pse_rce",
   "name": "PSE RCE Price Chain",
+  "codeowners": ["@grzegorz007"],
   "config_flow": true,
-  "codeowners": [],
-  "dependencies": [],
   "documentation": "https://github.com/grzegorz007/ha-pse-rce",
+  "integration_type": "service",
   "iot_class": "cloud_polling",
-  "version": "1.0.0",
-  "requirements": []
+  "issue_tracker": "https://github.com/grzegorz007/ha-pse-rce/issues",
+  "requirements": ["aiohttp"],
+  "version": "1.0.0"
 }
