@@ -7,7 +7,52 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
-from .const import CONF_HORIZON, CONF_START_FROM_MIDNIGHT, DEFAULT_HORIZON, DEFAULT_START_FROM_MIDNIGHT, DOMAIN
+from .const import (
+    CONF_CLAMP_NEGATIVE,
+    CONF_FALLBACK_STRATEGY,
+    CONF_HORIZON,
+    CONF_PRICE_FACTOR,
+    CONF_PRICE_OFFSET,
+    CONF_RESOLUTION,
+    CONF_START_FROM_MIDNIGHT,
+    DEFAULT_CLAMP_NEGATIVE,
+    DEFAULT_FALLBACK_STRATEGY,
+    DEFAULT_HORIZON,
+    DEFAULT_PRICE_FACTOR,
+    DEFAULT_PRICE_OFFSET,
+    DEFAULT_RESOLUTION,
+    DEFAULT_START_FROM_MIDNIGHT,
+    DOMAIN,
+)
+
+
+def _schema(defaults: dict) -> vol.Schema:
+    """Build the shared configuration schema."""
+    return vol.Schema(
+        {
+            vol.Required(CONF_HORIZON, default=defaults[CONF_HORIZON]): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=48)
+            ),
+            vol.Required(
+                CONF_START_FROM_MIDNIGHT, default=defaults[CONF_START_FROM_MIDNIGHT]
+            ): bool,
+            vol.Required(CONF_RESOLUTION, default=defaults[CONF_RESOLUTION]): vol.In(
+                ["15m", "30m"]
+            ),
+            vol.Required(
+                CONF_FALLBACK_STRATEGY, default=defaults[CONF_FALLBACK_STRATEGY]
+            ): vol.In(["last", "repeat", "zero"]),
+            vol.Required(
+                CONF_CLAMP_NEGATIVE, default=defaults[CONF_CLAMP_NEGATIVE]
+            ): bool,
+            vol.Required(CONF_PRICE_FACTOR, default=defaults[CONF_PRICE_FACTOR]): vol.All(
+                vol.Coerce(float), vol.Range(min=0)
+            ),
+            vol.Required(CONF_PRICE_OFFSET, default=defaults[CONF_PRICE_OFFSET]): vol.Coerce(
+                float
+            ),
+        }
+    )
 
 
 class PseRceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -20,25 +65,25 @@ class PseRceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
 
-        errors: dict[str, str] = {}
-
         if user_input is not None:
             return self.async_create_entry(
                 title="PSE RCE Prices",
                 data=user_input,
             )
 
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_HORIZON, default=DEFAULT_HORIZON): int,
-                vol.Required(CONF_START_FROM_MIDNIGHT, default=DEFAULT_START_FROM_MIDNIGHT): bool,
-            }
-        )
-
         return self.async_show_form(
             step_id="user",
-            data_schema=schema,
-            errors=errors,
+            data_schema=_schema(
+                {
+                    CONF_HORIZON: DEFAULT_HORIZON,
+                    CONF_START_FROM_MIDNIGHT: DEFAULT_START_FROM_MIDNIGHT,
+                    CONF_RESOLUTION: DEFAULT_RESOLUTION,
+                    CONF_FALLBACK_STRATEGY: DEFAULT_FALLBACK_STRATEGY,
+                    CONF_CLAMP_NEGATIVE: DEFAULT_CLAMP_NEGATIVE,
+                    CONF_PRICE_FACTOR: DEFAULT_PRICE_FACTOR,
+                    CONF_PRICE_OFFSET: DEFAULT_PRICE_OFFSET,
+                }
+            ),
         )
 
     @staticmethod
@@ -47,15 +92,11 @@ class PseRceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
         """Create the options flow."""
-        return PseRceOptionsFlowHandler(config_entry)
+        return PseRceOptionsFlowHandler()
 
 
 class PseRceOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for PSE RCE."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         """Manage the options."""
@@ -70,11 +111,29 @@ class PseRceOptionsFlowHandler(config_entries.OptionsFlow):
             self.config_entry.data.get(CONF_START_FROM_MIDNIGHT, DEFAULT_START_FROM_MIDNIGHT),
         )
 
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_HORIZON, default=horizon): int,
-                vol.Required(CONF_START_FROM_MIDNIGHT, default=start_from_midnight): bool,
-            }
-        )
+        defaults = {
+            CONF_HORIZON: horizon,
+            CONF_START_FROM_MIDNIGHT: start_from_midnight,
+            CONF_RESOLUTION: self.config_entry.options.get(
+                CONF_RESOLUTION,
+                self.config_entry.data.get(CONF_RESOLUTION, DEFAULT_RESOLUTION),
+            ),
+            CONF_FALLBACK_STRATEGY: self.config_entry.options.get(
+                CONF_FALLBACK_STRATEGY,
+                self.config_entry.data.get(CONF_FALLBACK_STRATEGY, DEFAULT_FALLBACK_STRATEGY),
+            ),
+            CONF_CLAMP_NEGATIVE: self.config_entry.options.get(
+                CONF_CLAMP_NEGATIVE,
+                self.config_entry.data.get(CONF_CLAMP_NEGATIVE, DEFAULT_CLAMP_NEGATIVE),
+            ),
+            CONF_PRICE_FACTOR: self.config_entry.options.get(
+                CONF_PRICE_FACTOR,
+                self.config_entry.data.get(CONF_PRICE_FACTOR, DEFAULT_PRICE_FACTOR),
+            ),
+            CONF_PRICE_OFFSET: self.config_entry.options.get(
+                CONF_PRICE_OFFSET,
+                self.config_entry.data.get(CONF_PRICE_OFFSET, DEFAULT_PRICE_OFFSET),
+            ),
+        }
 
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="init", data_schema=_schema(defaults))

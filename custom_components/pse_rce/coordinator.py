@@ -1,12 +1,14 @@
 """Data update coordinator for PSE RCE."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import asyncio
+from datetime import date, datetime, timedelta
 import logging
 import aiohttp
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .const import PSE_API_URL
 
@@ -27,7 +29,7 @@ class PseRceCoordinator(DataUpdateCoordinator):
         price_offset: float,
     ) -> None:
         """Initialize coordinator."""
-        self.horizon_hours = int(horizon_hours)
+        self.horizon_hours = min(max(int(horizon_hours), 1), 48)
         self.start_from_midnight = start_from_midnight
         self.resolution = resolution
         self.fallback_strategy = fallback_strategy
@@ -35,6 +37,9 @@ class PseRceCoordinator(DataUpdateCoordinator):
         self.price_factor = float(price_factor)
         self.price_offset = float(price_offset)
         
+        if resolution not in ("15m", "30m"):
+            raise ValueError(f"Unsupported PSE RCE resolution: {resolution}")
+
         update_interval = timedelta(minutes=30) if resolution == "30m" else timedelta(minutes=15)
         
         super().__init__(
@@ -52,129 +57,114 @@ class PseRceCoordinator(DataUpdateCoordinator):
         return round(adjusted, 5)
 
     async def _async_update_data(self) -> dict:
-        """Fetch prices perfectly mapped to configuration periods."""
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        query_url = f"{PSE_API_URL}?$filter=business_date%20ge%20'{today_str}'"
-        
+        """Fetch prices for the surrounding business dates and build a time chain."""
+        now = dt_util.now().replace(second=0, microsecond=0, tzinfo=None)
+        today = now.date()
+        target_dates = [today - timedelta(days=1), today, today + timedelta(days=1)]
         headers = {
             "accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": "Home Assistant PSE RCE integration",
         }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(query_url, headers=headers, timeout=20) as response:
-                if response.status != 200:
-                    raise UpdateFailed(f"Błąd pobierania z API PSE, status: {response.status}")
-                data = await response.json()
-                
-        records = data.get("value", [])
-        if not records:
-            raise UpdateFailed(f"API PSE nie zwróciło rekordów od daty {today_str}")
 
-        price_dict = {}
-        for record in records:
-            dtime_str = record.get("dtime")
-            rce_pln = record.get("rce_pln")
-            
-            if dtime_str and rce_pln is not None:
+        records: list[dict] = []
+        async with aiohttp.ClientSession() as session:
+            for target_date in target_dates:
+                date_string = target_date.isoformat()
+                query_url = f"{PSE_API_URL}?$filter=business_date%20eq%20'{date_string}'"
                 try:
-                    price_dict[str(dtime_str).strip()] = round(float(rce_pln) / 1000.0, 5)
-                except (ValueError, TypeError):
+                    async with session.get(query_url, headers=headers, timeout=20) as response:
+                        if response.status != 200:
+                            _LOGGER.warning(
+                                "Błąd pobierania z API PSE (%s), status: %s",
+                                date_string,
+                                response.status,
+                            )
+                            continue
+                        data = await response.json()
+                except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+                    _LOGGER.warning("Nie udało się pobrać danych PSE dla %s: %s", date_string, err)
                     continue
+                records.extend(data.get("value", []))
+
+        price_dict: dict[datetime, float] = {}
+        business_dates: dict[datetime, date] = {}
+        for record in records:
+            dtime_value = record.get("dtime")
+            rce_pln = record.get("rce_pln")
+            business_date = record.get("business_date")
+            if not dtime_value or rce_pln is None or not business_date:
+                continue
+            try:
+                dtime = datetime.fromisoformat(
+                    str(dtime_value).strip().replace("Z", "+00:00")
+                )
+                if dtime.tzinfo is not None:
+                    dtime = dt_util.as_local(dtime).replace(tzinfo=None)
+                price_dict[dtime] = round(float(rce_pln) / 1000.0, 5)
+                business_dates[dtime] = date.fromisoformat(str(business_date))
+            except (ValueError, TypeError):
+                continue
 
         if not price_dict:
             raise UpdateFailed("Brak poprawnych cen RCE do zmapowania w odpowiedzi")
 
-        now = datetime.now()
         step_minutes = 30 if self.resolution == "30m" else 15
         total_steps = self.horizon_hours * (60 // step_minutes)
-
         if self.start_from_midnight:
             start_dt = now.replace(hour=0, minute=step_minutes, second=0, microsecond=0)
         else:
-            minutes_to_add = step_minutes - (now.minute % step_minutes)
-            start_dt = now.replace(second=0, microsecond=0) + timedelta(minutes=minutes_to_add)
+            minutes_to_add = (-now.minute) % step_minutes or step_minutes
+            start_dt = now + timedelta(minutes=minutes_to_add)
 
-        def _get_price_for_timestamp(target_timestamp: datetime) -> float | None:
-            """Pobiera pojedynczy punkt cenowy z API z opcjonalnym uśrednianiem 30m."""
+        def get_price(target_timestamp: datetime) -> float | None:
+            """Read one end-of-period value, averaging two quarters for 30m."""
             if step_minutes == 30:
-                val1_dt = target_timestamp - timedelta(minutes=15)
-                val2_dt = target_timestamp
-                v1 = price_dict.get(val1_dt.strftime("%Y-%m-%d %H:%M:%S"))
-                v2 = price_dict.get(val2_dt.strftime("%Y-%m-%d %H:%M:%S"))
-                
-                if v1 is not None and v2 is not None:
-                    return (v1 + v2) / 2
-                if v1 is not None:
-                    return v1
-                if v2 is not None:
-                    return v2
-                return None
-            return price_dict.get(target_timestamp.strftime("%Y-%m-%d %H:%M:%S"))
+                values = [
+                    price_dict.get(target_timestamp - timedelta(minutes=15)),
+                    price_dict.get(target_timestamp),
+                ]
+                values = [value for value in values if value is not None]
+                return sum(values) / len(values) if values else None
+            return price_dict.get(target_timestamp)
 
+        first_raw_value = next(iter(price_dict.values()))
         result: list[float] = []
-
-        for i in range(total_steps):
-            target_dt = start_dt + timedelta(minutes=step_minutes * i)
-            val = _get_price_for_timestamp(target_dt)
-            
-            if val is not None:
-                result.append(self._transform_price(val))
-            else:
-                if self.fallback_strategy == "repeat":
-                    past_val = None
-                    days_back = 1
-                    while past_val is None and days_back <= 7:
-                        lookup_dt = target_dt - timedelta(days=days_back)
-                        past_val = _get_price_for_timestamp(lookup_dt)
-                        days_back += 1
-                    
-                    if past_val is not None:
-                        result.append(self._transform_price(past_val))
-                    else:
-                        fallback_val = result[-1] if result else self._transform_price(list(price_dict.values())[0])
-                        result.append(fallback_val)
-
-                elif self.fallback_strategy == "zero":
+        for index in range(total_steps):
+            target_dt = start_dt + timedelta(minutes=step_minutes * index)
+            raw_value = get_price(target_dt)
+            if raw_value is None and self.fallback_strategy == "repeat":
+                for days_back in range(1, 8):
+                    raw_value = get_price(target_dt - timedelta(days=days_back))
+                    if raw_value is not None:
+                        break
+            if raw_value is None:
+                if self.fallback_strategy == "zero":
                     result.append(0.0)
+                elif result:
+                    result.append(result[-1])
+                else:
+                    result.append(self._transform_price(first_raw_value))
+            else:
+                result.append(self._transform_price(raw_value))
 
-                else:  # "last"
-                    fallback_val = result[-1] if result else self._transform_price(list(price_dict.values())[0])
-                    result.append(fallback_val)
-
-        current_price = result[0] if result else 0.0
-
-        # Bezpieczne obliczanie min i max dla bieżącej doby
-        today_min_price = None
-        today_min_time = None
-        today_max_price = None
-        today_max_time = None
-
-        try:
-            today_prefix = today_str  # "YYYY-MM-DD"
-            tomorrow_prefix = (now.date() + timedelta(days=1)).strftime("%Y-%m-%d")
-            
-            today_prices = []
-            for dtime_k, raw_val in price_dict.items():
-                # Rekordy z dzisiaj lub dokładnie północ zamykająca dobę (np. YYYY-MM-DD 00:00:00 dnia jutrzejszego)
-                if dtime_k.startswith(today_prefix):
-                    today_prices.append((self._transform_price(raw_val), dtime_k))
-                elif dtime_k.startswith(f"{tomorrow_prefix} 00:00:00"):
-                    today_prices.append((self._transform_price(raw_val), dtime_k))
-
-            if today_prices:
-                min_item = min(today_prices, key=lambda x: x[0])
-                max_item = max(today_prices, key=lambda x: x[0])
-                today_min_price = min_item[0]
-                today_min_time = min_item[1]
-                today_max_price = max_item[0]
-                today_max_time = max_item[1]
-        except Exception as err:
-            _LOGGER.warning("Nie udało się wyznaczyć min/max dla doby: %s", err)
+        today_prices = [
+            (self._transform_price(raw_value), timestamp)
+            for timestamp, raw_value in price_dict.items()
+            if business_dates.get(timestamp) == today
+        ]
+        today_min_price = today_min_time = today_max_price = today_max_time = None
+        if today_prices:
+            min_item = min(today_prices, key=lambda item: item[0])
+            max_item = max(today_prices, key=lambda item: item[0])
+            today_min_price, today_min_time = min_item[0], min_item[1].isoformat(sep=" ")
+            today_max_price, today_max_time = max_item[0], max_item[1].isoformat(sep=" ")
 
         return {
-            "native_value": current_price,
-            "list": result[:total_steps],
+            "native_value": result[0] if result else 0.0,
+            "list": result,
+            "forecast_start": start_dt.isoformat(),
+            "resolution": self.resolution,
+            "start_from_midnight": self.start_from_midnight,
             "today_min_price": today_min_price,
             "today_min_time": today_min_time,
             "today_max_price": today_max_price,

@@ -70,11 +70,23 @@ class PseRcePriceChainSensor(BasePseRceSensor):
         return None
 
     @property
-    def extra_state_attributes(self) -> dict[str, list[float]]:
+    def extra_state_attributes(self) -> dict[str, object]:
         """Return the forecast price chain list."""
         if self.coordinator.data:
-            return {"list": self.coordinator.data.get("list", [])}
-        return {"list": []}
+            return {
+                "list": self.coordinator.data.get("list", []),
+                "forecast_start": self.coordinator.data.get("forecast_start"),
+                "resolution": self.coordinator.data.get("resolution"),
+                "start_from_midnight": self.coordinator.data.get(
+                    "start_from_midnight", False
+                ),
+            }
+        return {
+            "list": [],
+            "forecast_start": None,
+            "resolution": None,
+            "start_from_midnight": False,
+        }
 
 
 class PseRceTodayMinPriceSensor(BasePseRceSensor):
